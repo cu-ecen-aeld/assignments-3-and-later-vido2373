@@ -11,6 +11,7 @@ then
 	exit 1
 fi
 
-x=$(ls $1 | wc -l)
+x=$(find $1 -mindepth 1 | wc -l)
+y=$(grep -r $2 $1 | wc -l)
 
-echo "The number of files are $x"
+echo "The number of files are $x and the number of matching lines are $y"
