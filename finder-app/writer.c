@@ -9,8 +9,11 @@
 #include <syslog.h>
 
 int main(int argc, char* argv[]) {
+    openlog(NULL, 0, LOG_USER);
+
+    //Check for correct number of arguments
     if (argc != 3) {
-        printf("Incorrect number arguments: 2 needed\n");
+        syslog(LOG_ERR, "Incorrect number arguments: 2 needed\n");
         return 1; //TODO: look at return codes, put the correct one
     }
     
@@ -20,7 +23,6 @@ int main(int argc, char* argv[]) {
     char* filepath = strdup(argv[1]);
     char* pathname = dirname(filepath);
 
-    openlog(NULL, 0, LOG_USER);
 
     if (access(pathname, F_OK) != 0) {
         if (mkdir(pathname, S_IRWXU | S_IRWXG | S_IROTH | S_IWOTH) == -1) {
