@@ -1,8 +1,9 @@
 #include "systemcalls.h"
 #include <stdlib.h>
 #include <fcntl.h>
-#include <unistd.h>
 #include <sys/wait.h>
+#include <sys/types.h>
+#include <unistd.h>
 #include <stdio.h>
 
 /**
@@ -110,9 +111,6 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
         command[i] = va_arg(args, char *);
     }
     command[count] = NULL;
-    // this line is to avoid a compile warning before your implementation is complete
-    // and may be removed
-    command[count] = command[count];
 
 
 /*
@@ -122,47 +120,46 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
  *   The rest of the behaviour is same as do_exec()
  *   
 */
-    int fd;
     pid_t pid;
+    int status;
 
     pid = fork();
-    if (pid == -1) {
-        perror("fork");
-        return false;
-    }
-    else if (pid == 0) {
-        if ((fd = open(outputfile, O_WRONLY | O_CREAT, 0777) == -1)) {
+    if (pid == 0) {
+        int fd;
+        if ((fd = open(outputfile, O_WRONLY | O_CREAT | O_TRUNC, 0777)) == -1) {
             perror("open");
-            exit(-1); 
+            return false;
         }
 
         if (dup2(fd, STDOUT_FILENO) == -1) {
             perror("dup2");
-            exit(-1);
-        }
-        
-        if (close(fd) == -1) {
-            perror("close");
-            exit(-1);
+            return false;
         }
 
-        execv(command[0], command);
+        close(fd);
+        
+        if (execv(command[0], &command[0]) == -1) {
+            perror("execv");
+            return false;
+        }
         exit(-1);
     }
+    else if (pid == -1) {
+        perror("fork");
+        return false;
+    }
     else {
-        //if (close(fd) == -1) {
-        //    perror("close");
-        //}
-        int status;
-        waitpid(pid, &status, 0);
+        if (waitpid(pid, &status, 0) == -1) {
+            perror("waitpid");
+            return false;
+        }
         if (WIFEXITED(status)) {
-            int exit_status = WEXITSTATUS(status);
-            if (exit_status != 0) {
+            if (WEXITSTATUS(status) != 0) {
                 return false;
             }
         }
     }
-    
+   
     va_end(args);
     
     return true;
