@@ -124,7 +124,11 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
     int status;
 
     pid = fork();
-    if (pid == 0) {
+    if (pid == -1) {
+        perror("fork");
+        return false;
+    } 
+    else if (pid == 0) {
         int fd;
         if ((fd = open(outputfile, O_WRONLY | O_CREAT | O_TRUNC, 0777)) == -1) {
             perror("open");
@@ -143,10 +147,6 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
             return false;
         }
         exit(-1);
-    }
-    else if (pid == -1) {
-        perror("fork");
-        return false;
     }
     else {
         if (waitpid(pid, &status, 0) == -1) {
