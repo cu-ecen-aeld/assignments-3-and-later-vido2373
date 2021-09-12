@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 
 # Check num of args
 if [ $# -ne 2 ]
