@@ -99,8 +99,6 @@ cp -a ${SYSROOT}/lib64/libc-2.31.so lib64
 sudo mknod -m 666 dev/null c 1 3
 sudo mknod -m 666 dev/console c 5 1
 
-#cd ${OUTDIR}/linux-stable
-#git checkout ${KERNEL_VERSION}
 # TODO: Clean and build the writer utility
 cd ${FINDER_APP_DIR}
 if [ -e writer ]
