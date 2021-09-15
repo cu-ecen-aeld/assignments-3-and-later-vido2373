@@ -1,4 +1,10 @@
 #include "systemcalls.h"
+#include <stdlib.h>
+#include <fcntl.h>
+#include <sys/wait.h>
+#include <sys/types.h>
+#include <unistd.h>
+#include <stdio.h>
 
 /**
  * @param cmd the command to execute with system()
@@ -17,6 +23,10 @@ bool do_system(const char *cmd)
  *   or false() if it returned a failure
 */
 
+    int ret = system(cmd);
+    if (ret == -1) {
+        return false;
+    }
     return true;
 }
 
@@ -47,7 +57,7 @@ bool do_exec(int count, ...)
     command[count] = NULL;
     // this line is to avoid a compile warning before your implementation is complete
     // and may be removed
-    command[count] = command[count];
+    // command[count] = command[count];
 
 /*
  * TODO:
@@ -59,6 +69,27 @@ bool do_exec(int count, ...)
  *   
 */
 
+    pid_t pid;
+    pid = fork();
+
+    if (pid == -1) {
+        perror("fork");
+        return false;
+    }
+    else if (pid == 0) {
+        execv(command[0], command);
+        exit(-1);
+    }
+    else {
+        int status;
+        waitpid(pid, &status, 0);
+        if (WIFEXITED(status)) {
+            int exit_status = WEXITSTATUS(status);
+            if (exit_status != 0) {
+                return false;
+            }
+        }
+    }
     va_end(args);
 
     return true;
@@ -80,9 +111,6 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
         command[i] = va_arg(args, char *);
     }
     command[count] = NULL;
-    // this line is to avoid a compile warning before your implementation is complete
-    // and may be removed
-    command[count] = command[count];
 
 
 /*
@@ -92,7 +120,46 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
  *   The rest of the behaviour is same as do_exec()
  *   
 */
+    pid_t pid;
+    int status;
 
+    pid = fork();
+    if (pid == -1) {
+        perror("fork");
+        return false;
+    } 
+    else if (pid == 0) {
+        int fd;
+        if ((fd = open(outputfile, O_WRONLY | O_CREAT | O_TRUNC, 0777)) == -1) {
+            perror("open");
+            return false;
+        }
+
+        if (dup2(fd, STDOUT_FILENO) == -1) {
+            perror("dup2");
+            return false;
+        }
+
+        close(fd);
+        
+        if (execv(command[0], &command[0]) == -1) {
+            perror("execv");
+            return false;
+        }
+        exit(-1);
+    }
+    else {
+        if (waitpid(pid, &status, 0) == -1) {
+            perror("waitpid");
+            return false;
+        }
+        if (WIFEXITED(status)) {
+            if (WEXITSTATUS(status) != 0) {
+                return false;
+            }
+        }
+    }
+   
     va_end(args);
     
     return true;
