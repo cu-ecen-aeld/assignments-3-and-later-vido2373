@@ -49,6 +49,7 @@ int main(int argc, char* argv[]) {
     struct addrinfo hints;
     struct addrinfo* servinfo;
     struct sockaddr peer_addr;
+    int reuse_addr = 1;
     socklen_t peer_addr_len;
     char recv_buff[RECV_SIZE + 1];
     char* ip_addr_str;
@@ -96,7 +97,7 @@ int main(int argc, char* argv[]) {
 
     // Get socket info
     memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_UNSPEC;
+    hints.ai_family = AF_INET;
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_flags = AI_PASSIVE;
     
@@ -112,10 +113,19 @@ int main(int argc, char* argv[]) {
         return -1;
     }
 
-    if (bind(sock_fd, servinfo->ai_addr, servinfo->ai_addrlen) != 0) {
-        syslog(LOG_ERR, "bind");
+    // Reuse address
+    if (setsockopt(sock_fd, SOL_SOCKET, SO_REUSEADDR, &reuse_addr, sizeof(int)) == -1) {
+        syslog(LOG_ERR, "setsockopt");
+        close(sock_fd);
         return -1;
     }
+
+    if (bind(sock_fd, servinfo->ai_addr, servinfo->ai_addrlen) != 0) {
+        syslog(LOG_ERR, "bind");
+        close(sock_fd);
+        return -1;
+    }
+
 
     freeaddrinfo(servinfo);
 
@@ -127,6 +137,7 @@ int main(int argc, char* argv[]) {
             }
         }
     }
+    printf("is_daemon: %d\n", is_daemon);
 
     if (is_daemon) {
         pid = fork();
@@ -136,11 +147,7 @@ int main(int argc, char* argv[]) {
             close(sock_fd);
             exit(EXIT_FAILURE);
         }
-        // Close parent
-        else if (pid > 0) {
-            exit(EXIT_SUCCESS);
-        }
-        else {
+        else if (pid == 0) {
             if (setsid() == -1) {
                 perror("setsid");
                 syslog(LOG_ERR, "setsid");
@@ -164,10 +171,15 @@ int main(int argc, char* argv[]) {
             close(STDOUT_FILENO);
             close(STDERR_FILENO);
         }
+        // Close parent
+        else {
+            exit(EXIT_SUCCESS);
+        }
     }
 
     if (listen(sock_fd, MAX_CONNECTIONS) == -1) {
         syslog(LOG_ERR, "listen");
+        close(sock_fd);
         return -1;
     }
 
@@ -175,6 +187,7 @@ int main(int argc, char* argv[]) {
     if (outfile_fd == -1) {
         perror("open");
         syslog(LOG_ERR, "open");
+        close(sock_fd);
         exit(EXIT_FAILURE);
     }
 
