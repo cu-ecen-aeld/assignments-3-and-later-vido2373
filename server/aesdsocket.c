@@ -137,7 +137,6 @@ int main(int argc, char* argv[]) {
             }
         }
     }
-    printf("is_daemon: %d\n", is_daemon);
 
     if (is_daemon) {
         pid = fork();
