@@ -488,7 +488,6 @@ int main(int argc, char** argv) {
             exit(EXIT_FAILURE);
         }
 
-        snode_t* prev = node;
         LIST_FOREACH(node, &head, entries) {
             if (node->t_data.success) {
                 if (close(node->t_data.client_fd) == -1) {
@@ -508,10 +507,8 @@ int main(int argc, char** argv) {
                     close(sock_fd);
                     exit(EXIT_FAILURE);
                 }
-                prev = LIST_PREV(node, &head, snode_s, entries);
                 LIST_REMOVE(node, entries);
                 free(node);
-                node = prev;
             }            
         }
 
@@ -521,12 +518,14 @@ int main(int argc, char** argv) {
 
     while(!LIST_EMPTY(&head)) {
         node = LIST_FIRST(&head);
-        if (pthread_cancel(node->t_data.tid) != 0) {
-            perror("pthread_cancel");
-            syslog(LOG_ERR, "pthread_cancel");
-            close(outfile_fd);
-            close(sock_fd);
-            exit(EXIT_FAILURE);
+        if (!node->t_data.success) {
+            if (pthread_cancel(node->t_data.tid) != 0) {
+                perror("pthread_cancel");
+                syslog(LOG_ERR, "pthread_cancel");
+                close(outfile_fd);
+                close(sock_fd);
+                exit(EXIT_FAILURE);
+            }
         }
 
         close(node->t_data.client_fd);
