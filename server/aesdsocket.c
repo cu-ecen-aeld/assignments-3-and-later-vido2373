@@ -14,6 +14,7 @@
 #include <errno.h>
 #include <pthread.h>
 #include <sys/queue.h>
+#include <time.h>
 
 
 #define PORT_NUM (9000)
@@ -53,6 +54,13 @@ struct snode_s {
     LIST_ENTRY(snode_s) entries;
 };
 
+
+typedef struct time_struct_s {
+    int outfile_fd;
+    pthread_mutex_t* mutex;
+} time_struct_t;
+
+
 int sock_fd;
 int continue_program = 1;
 pthread_mutex_t mutex;
@@ -71,6 +79,24 @@ void sig_handler(int signo) {
         
         continue_program = 0;
     }
+}
+
+
+static void timer_thread(union sigval sigval) {
+    time_struct_t* t = (time_struct_t*)sigval.sival_ptr;
+    char time_buff[BASE_BUFFER_SIZE];
+    int time_buff_len = 0;
+    time_t real_time;
+    struct tm* time_info;
+    
+    time(&real_time);
+    time_info = localtime(&real_time);
+
+    time_buff_len = strftime(time_buff, BASE_BUFFER_SIZE, "timestamp:%a, %d %b %Y %T %z\n", time_info);
+
+    pthread_mutex_lock(t->mutex);
+    write(t->outfile_fd, time_buff, time_buff_len);
+    pthread_mutex_unlock(t->mutex);
 }
 
 
@@ -282,13 +308,18 @@ int main(int argc, char** argv) {
     int reuse_addr = 1;
     socklen_t peer_addr_len = sizeof(peer_addr);
     char* ip_addr_str;
-    
 
     int is_daemon = 0;
     int dev_null_fd = 0;
     pid_t pid = 0;
 
     snode_t* node = NULL;
+
+    struct sigevent sev;
+    time_struct_t td;
+    timer_t timer_id;
+    struct itimerspec timer_specs;
+    int clock_id = CLOCK_MONOTONIC;
 
     openlog(NULL, 0, LOG_USER);
 
@@ -425,6 +456,36 @@ int main(int argc, char** argv) {
     }
 
 
+    td.outfile_fd = outfile_fd;
+    td.mutex = &mutex;
+
+    memset(&sev, 0, sizeof(struct sigevent));
+
+    sev.sigev_notify = SIGEV_THREAD;
+    sev.sigev_value.sival_ptr = &td;
+    sev.sigev_notify_function = timer_thread;
+
+    if (timer_create(clock_id, &sev, &timer_id) != 0) {
+        perror("timer_create");
+        syslog(LOG_ERR, "timer_create");
+        close(sock_fd);
+        close(outfile_fd);
+        exit(EXIT_FAILURE);
+    }
+
+    timer_specs.it_value.tv_sec = 10;
+    timer_specs.it_value.tv_nsec = 0;
+    timer_specs.it_interval.tv_sec = timer_specs.it_value.tv_sec;
+    timer_specs.it_interval.tv_nsec = timer_specs.it_value.tv_nsec;
+
+    if (timer_settime(timer_id, 0, &timer_specs, NULL) == -1) {
+        perror("set_time");
+        syslog(LOG_ERR, "set_time");
+        close(sock_fd);
+        close(outfile_fd);
+        exit(EXIT_FAILURE);
+    }
+
     while (continue_program) {
         client_fd = accept(sock_fd, &peer_addr, &peer_addr_len);
         if (client_fd == -1) {
@@ -488,6 +549,7 @@ int main(int argc, char** argv) {
             exit(EXIT_FAILURE);
         }
 
+        snode_t* prev = node;
         LIST_FOREACH(node, &head, entries) {
             if (node->t_data.success) {
                 if (close(node->t_data.client_fd) == -1) {
@@ -509,7 +571,9 @@ int main(int argc, char** argv) {
                 }
                 LIST_REMOVE(node, entries);
                 free(node);
-            }            
+                node = prev;
+            }
+            prev = node;
         }
 
 

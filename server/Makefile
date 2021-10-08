@@ -8,8 +8,8 @@ all: aesdsocket
 default: aesdsocket
 
 aesdsocket: aesdsocket.c
-	${CROSS_COMPILE}${CC} -c -o aesdsocket.o aesdsocket.c ${CFLAGS}
-	${CROSS_COMPILE}${CC} ${LDFLAGS} -o aesdsocket aesdsocket.o
+	${CROSS_COMPILE}${CC} -c -o aesdsocket.o aesdsocket.c ${CFLAGS} ${LDFLAGS}
+	${CROSS_COMPILE}${CC} -o aesdsocket aesdsocket.o ${CFLAGS} ${LDFLAGS}
 
 clean:
 	rm -f aesdsocket *.o
