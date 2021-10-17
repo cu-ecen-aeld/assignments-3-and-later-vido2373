@@ -52,7 +52,7 @@ Code: d2800001 d2800000 d503233f d50323bf (b900003f)
 The line `Unable to handle kernel NULL pointer dereference at virtual address`  
 `0000000000000000` tells us that we tried to read from or write to address 0.  
 From the line `pc : faulty_write+0x10/0x20 [faulty]` we can see that the fault  
-occurs in the function `faulty_write' and that it occurs 0x10 bytes into a 0x20  
+occurs in the function `faulty_write` and that it occurs 0x10 bytes into a 0x20  
 byte function, so roughly halfway. If we open up the function faulty_write.c, we  
 can see that halfway through the function is the code snippet: `*(int *)0 = 0;`,  
 which is absolutely a write to a NULL pointer.
