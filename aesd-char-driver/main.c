@@ -141,6 +141,7 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
 		if (overwritten) {
 			kfree(overwritten);
 		}
+        my_dev->temp_entry.buffptr = 0;
 		my_dev->temp_entry.size = 0;
 	}
 
@@ -208,7 +209,11 @@ void aesd_cleanup_module(void)
 	/**
 	 * TODO: cleanup AESD specific poritions here as necessary
 	 */
-	// free aesd_entries in aesd_circular_buffer
+	aesd_circular_buffer_free(&aesd_device.queue);
+    if (aesd_device.temp_entry.buffptr != 0) {
+        kfree(aesd_device.temp_entry.buffptr);
+        aesd_device.temp_entry.size = 0;
+    }
 
 	unregister_chrdev_region(devno, 1);
 }

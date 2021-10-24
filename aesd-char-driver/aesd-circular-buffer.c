@@ -88,6 +88,31 @@ const char* aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, 
     return overwritten;
 }
 
+
+extern void aesd_circular_buffer_free(struct aesd_circular_buffer *buffer) {
+    int entry_num = buffer->out_offs;
+
+    // empty case
+    if ((entry_num == buffer->in_offs) && !(buffer->full)) {
+        return;
+    }
+
+    do {
+#ifdef __KERNEL__
+        kfree(buffer->entry[entry_num].buffptr);
+#else
+        free(buffer->entry[entry_num].buffptr);
+#endif
+        buffer->entry[entry_num].size = 0;
+        entry_num++;
+        entry_num %= AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED;
+    } while (entry_num != buffer->in_offs);
+
+    buffer->in_offs = 0;
+    buffer->out_offs = 0;
+}
+
+
 /**
 * Initializes the circular buffer described by @param buffer to an empty struct
 */
