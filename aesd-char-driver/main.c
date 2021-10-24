@@ -55,17 +55,40 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
                 loff_t *f_pos)
 {
 	ssize_t retval = 0;
+	struct aesd_dev* my_dev = (struct aesd_dev *)(filp->private_data);
+	size_t buf_offs = 0;
+	size_t bytes_remaining = count;
+	size_t num_bytes_read = 0;
+	size_t bytes_to_read = 0;
+	struct aesd_buffer_entry* entry = NULL;
+	size_t entry_offs;
+
 	PDEBUG("read %zu bytes with offset %lld",count,*f_pos);
 	/**
 	 * TODO: handle read
 	 */
 
-	// lock sem
-	// travel to offset f_pos
-	// while (bytes_to_read > 0) {
-		//get num bytes until end of entry
-		//copy_to_user(buf, aesd_device.aesd_circ_buff.entry[aesd_device.aesd_circ_buff.out_offs], num bytes);
-	//}
+	if (mutex_lock_interruptible(&my_dev->lock)) {
+		return -ERESTARTSYS;
+	}
+
+	while (bytes_remaining > 0) {
+		entry = aesd_circular_buffer_find_entry_offset_for_fpos(&my_dev->queue, *f_pos, &entry_offs);
+		if (entry == NULL) {
+			break;
+		}
+		bytes_to_read = entry->size - entry_offs;
+		num_bytes_read = bytes_to_read - copy_to_user(&buf[buf_offs], &entry->buffptr[entry_offs], bytes_to_read);
+		if (num_bytes_read != bytes_to_read) {
+			PDEBUG("Wanted %ld bytes, got %ld bytes\n", bytes_to_read, num_bytes_read);
+		}
+		bytes_remaining -= num_bytes_read;
+		*f_pos += num_bytes_read;
+		buf_offs += num_bytes_read;
+		retval += num_bytes_read;
+	}
+
+	mutex_unlock(&my_dev->lock);
 	return retval;
 }
 
