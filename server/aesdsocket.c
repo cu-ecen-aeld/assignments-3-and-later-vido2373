@@ -14,11 +14,15 @@
 #include <errno.h>
 #include <pthread.h>
 #include <sys/queue.h>
-#include <time.h>
 
+#define USE_AESD_CHAR_DEVICE 1
 
 #define PORT_NUM (9000)
+#ifdef USE_AESD_CHAR_DEVICE
+#define OUTPUT_FILE "/dev/aesdchar"
+#else
 #define OUTPUT_FILE "/var/tmp/aesdsocketdata"
+#endif
 #define MAX_CONNECTIONS (10)
 #define BASE_BUFFER_SIZE (100)
 
@@ -55,11 +59,6 @@ struct snode_s {
 };
 
 
-typedef struct time_struct_s {
-    int outfile_fd;
-    pthread_mutex_t* mutex;
-} time_struct_t;
-
 
 int sock_fd;
 int continue_program = 1;
@@ -79,24 +78,6 @@ void sig_handler(int signo) {
         
         continue_program = 0;
     }
-}
-
-
-static void timer_thread(union sigval sigval) {
-    time_struct_t* t = (time_struct_t*)sigval.sival_ptr;
-    char time_buff[BASE_BUFFER_SIZE];
-    int time_buff_len = 0;
-    time_t real_time;
-    struct tm* time_info;
-    
-    time(&real_time);
-    time_info = localtime(&real_time);
-
-    time_buff_len = strftime(time_buff, BASE_BUFFER_SIZE, "timestamp:%a, %d %b %Y %T %z\n", time_info);
-
-    pthread_mutex_lock(t->mutex);
-    write(t->outfile_fd, time_buff, time_buff_len);
-    pthread_mutex_unlock(t->mutex);
 }
 
 
@@ -204,9 +185,9 @@ void* ReceiveAndSendPackets(void* thread_data) {
                 free(t->readout_buff);
                 exit(EXIT_FAILURE);
             }
-
+#ifndef USE_AESD_CHAR_DEVICE
             lseek(t->outfile_fd, 0, SEEK_SET);
-            
+#endif
             read_status = read(t->outfile_fd, &(t->readout_buff[readout_buff_index]), 1);
             if (read_status == -1) {
                 perror("read");
@@ -268,9 +249,9 @@ void* ReceiveAndSendPackets(void* thread_data) {
                 }
 
             }
-
+#ifndef USE_AESD_CHAR_DEVICE
             lseek(t->outfile_fd, 0, SEEK_END);
-
+#endif
             if (pthread_mutex_unlock(t->mutex) != 0) {
                 perror("pthread_mutex_lock");
                 syslog(LOG_ERR, "pthread_mutex_lock");
@@ -315,11 +296,6 @@ int main(int argc, char** argv) {
 
     snode_t* node = NULL;
 
-    struct sigevent sev;
-    time_struct_t td;
-    timer_t timer_id;
-    struct itimerspec timer_specs;
-    int clock_id = CLOCK_MONOTONIC;
 
     openlog(NULL, 0, LOG_USER);
 
@@ -439,7 +415,7 @@ int main(int argc, char** argv) {
     outfile_fd = open(OUTPUT_FILE, O_RDWR | O_CREAT | O_TRUNC, 0666);
     if (outfile_fd == -1) {
         perror("open");
-        syslog(LOG_ERR, "open");
+        syslog(LOG_ERR, "Could not open %s", OUTPUT_FILE);
         close(sock_fd);
         exit(EXIT_FAILURE);
     }
@@ -450,37 +426,6 @@ int main(int argc, char** argv) {
     if (pthread_mutex_init(&mutex, NULL) != 0) {
         perror("pthread_mutex_init");
         syslog(LOG_ERR, "pthread_mutex_init");
-        close(sock_fd);
-        close(outfile_fd);
-        exit(EXIT_FAILURE);
-    }
-
-
-    td.outfile_fd = outfile_fd;
-    td.mutex = &mutex;
-
-    memset(&sev, 0, sizeof(struct sigevent));
-
-    sev.sigev_notify = SIGEV_THREAD;
-    sev.sigev_value.sival_ptr = &td;
-    sev.sigev_notify_function = timer_thread;
-
-    if (timer_create(clock_id, &sev, &timer_id) != 0) {
-        perror("timer_create");
-        syslog(LOG_ERR, "timer_create");
-        close(sock_fd);
-        close(outfile_fd);
-        exit(EXIT_FAILURE);
-    }
-
-    timer_specs.it_value.tv_sec = 10;
-    timer_specs.it_value.tv_nsec = 0;
-    timer_specs.it_interval.tv_sec = timer_specs.it_value.tv_sec;
-    timer_specs.it_interval.tv_nsec = timer_specs.it_value.tv_nsec;
-
-    if (timer_settime(timer_id, 0, &timer_specs, NULL) == -1) {
-        perror("set_time");
-        syslog(LOG_ERR, "set_time");
         close(sock_fd);
         close(outfile_fd);
         exit(EXIT_FAILURE);
@@ -628,12 +573,13 @@ int main(int argc, char** argv) {
         exit(EXIT_FAILURE); 
 
     }
-
+#ifndef USE_AESD_CHAR_DEVICE
     if (remove(OUTPUT_FILE) == -1) {
         perror("remove");
         syslog(LOG_ERR, "remove");
         exit(EXIT_FAILURE);
     }
+#endif
     closelog();
 
     return 0;

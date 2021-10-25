@@ -74,10 +74,16 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
 
 	while (bytes_remaining > 0) {
 		entry = aesd_circular_buffer_find_entry_offset_for_fpos(&my_dev->queue, *f_pos, &entry_offs);
+
+        // f_pos is beyond length of device
 		if (entry == NULL) {
 			break;
 		}
 		bytes_to_read = entry->size - entry_offs;
+        if (bytes_to_read > count) {
+            bytes_to_read = count;
+        }
+
 		num_bytes_read = bytes_to_read - copy_to_user(&buf[buf_offs], &entry->buffptr[entry_offs], bytes_to_read);
 		if (num_bytes_read != bytes_to_read) {
 			PDEBUG("Wanted %ld bytes, got %ld bytes\n", bytes_to_read, num_bytes_read);
@@ -87,6 +93,11 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
 		buf_offs += num_bytes_read;
 		retval += num_bytes_read;
 	}
+
+    // If we are at EOF, reset f_pos to 0
+    if (retval == 0) {
+        *f_pos = 0;
+    }
 
 	mutex_unlock(&my_dev->lock);
 	return retval;
@@ -145,6 +156,8 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
 		my_dev->temp_entry.size = 0;
 	}
 
+    // Offset doesn't matter for write, so we set it to the beginning for read ops
+    *f_pos = 0;
 
   cleanup:
 	mutex_unlock(&my_dev->lock);

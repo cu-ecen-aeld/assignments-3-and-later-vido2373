@@ -101,7 +101,7 @@ extern void aesd_circular_buffer_free(struct aesd_circular_buffer *buffer) {
 #ifdef __KERNEL__
         kfree(buffer->entry[entry_num].buffptr);
 #else
-        free(buffer->entry[entry_num].buffptr);
+        free((char *)buffer->entry[entry_num].buffptr);
 #endif
         buffer->entry[entry_num].size = 0;
         entry_num++;
