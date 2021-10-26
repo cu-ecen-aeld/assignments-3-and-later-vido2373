@@ -223,6 +223,10 @@ void aesd_cleanup_module(void)
 	 * TODO: cleanup AESD specific poritions here as necessary
 	 */
 	aesd_circular_buffer_free(&aesd_device.queue);
+    if (aesd_device.temp_entry.buffptr != 0) {
+        kfree(aesd_device.temp_entry.buffptr);
+        aesd_device.temp_entry.size = 0;
+    }
 
 	unregister_chrdev_region(devno, 1);
 }
