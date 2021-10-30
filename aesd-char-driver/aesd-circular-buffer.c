@@ -64,12 +64,14 @@ struct aesd_buffer_entry *aesd_circular_buffer_find_entry_offset_for_fpos(struct
 * Any necessary locking must be handled by the caller
 * Any memory referenced in @param add_entry must be allocated by and/or must have a lifetime managed by the caller.
 */
-void aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, const struct aesd_buffer_entry *add_entry)
+const char* aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, const struct aesd_buffer_entry *add_entry)
 {
     /**
     * TODO: implement per description 
     */
+    const char* overwritten = NULL;
     if (buffer->full) {
+        overwritten = buffer->entry[buffer->out_offs].buffptr;
         buffer->entry[buffer->in_offs++] = *add_entry;
         buffer->out_offs++;
         buffer->out_offs %= AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED;
@@ -82,7 +84,34 @@ void aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, const s
     if (buffer->in_offs == buffer->out_offs) {
         buffer->full = true;
     }
+
+    return overwritten;
 }
+
+
+extern void aesd_circular_buffer_free(struct aesd_circular_buffer *buffer) {
+    int entry_num = buffer->out_offs;
+
+    // empty case
+    if ((entry_num == buffer->in_offs) && !(buffer->full)) {
+        return;
+    }
+
+    do {
+#ifdef __KERNEL__
+        kfree(buffer->entry[entry_num].buffptr);
+#else
+        free((char *)buffer->entry[entry_num].buffptr);
+#endif
+        buffer->entry[entry_num].size = 0;
+        entry_num++;
+        entry_num %= AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED;
+    } while (entry_num != buffer->in_offs);
+
+    buffer->in_offs = 0;
+    buffer->out_offs = 0;
+}
+
 
 /**
 * Initializes the circular buffer described by @param buffer to an empty struct

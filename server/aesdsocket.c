@@ -14,11 +14,15 @@
 #include <errno.h>
 #include <pthread.h>
 #include <sys/queue.h>
-#include <time.h>
 
+#define USE_AESD_CHAR_DEVICE 1
 
 #define PORT_NUM (9000)
+#ifdef USE_AESD_CHAR_DEVICE
+#define OUTPUT_FILE "/dev/aesdchar"
+#else
 #define OUTPUT_FILE "/var/tmp/aesdsocketdata"
+#endif
 #define MAX_CONNECTIONS (10)
 #define BASE_BUFFER_SIZE (100)
 
@@ -33,7 +37,6 @@ typedef struct thread_data{
     pthread_t tid;
     int sock_fd;
     int client_fd;
-    int outfile_fd;
     pthread_mutex_t* mutex;
     char* writeout_buff;
     int writeout_buff_size;
@@ -54,11 +57,6 @@ struct snode_s {
     LIST_ENTRY(snode_s) entries;
 };
 
-
-typedef struct time_struct_s {
-    int outfile_fd;
-    pthread_mutex_t* mutex;
-} time_struct_t;
 
 
 int sock_fd;
@@ -82,25 +80,8 @@ void sig_handler(int signo) {
 }
 
 
-static void timer_thread(union sigval sigval) {
-    time_struct_t* t = (time_struct_t*)sigval.sival_ptr;
-    char time_buff[BASE_BUFFER_SIZE];
-    int time_buff_len = 0;
-    time_t real_time;
-    struct tm* time_info;
-    
-    time(&real_time);
-    time_info = localtime(&real_time);
-
-    time_buff_len = strftime(time_buff, BASE_BUFFER_SIZE, "timestamp:%a, %d %b %Y %T %z\n", time_info);
-
-    pthread_mutex_lock(t->mutex);
-    write(t->outfile_fd, time_buff, time_buff_len);
-    pthread_mutex_unlock(t->mutex);
-}
-
-
 void* ReceiveAndSendPackets(void* thread_data) {
+    int outfile_fd;
     int writeout_buff_index = 0;
     int bytes_recvd = 0, bytes_written_to_file = 0;
     int full_packet_received = 0;
@@ -108,12 +89,20 @@ void* ReceiveAndSendPackets(void* thread_data) {
     int read_status = 0, send_status = 0;
     thread_data_t* t  = (thread_data_t *)thread_data;
 
+    outfile_fd = open(OUTPUT_FILE, O_RDWR | O_CREAT | O_TRUNC, 0666);
+    if (outfile_fd == -1) {
+        perror("open");
+        syslog(LOG_ERR, "Could not open %s", OUTPUT_FILE);
+        close(sock_fd);
+        exit(EXIT_FAILURE);
+    }
+
     while (1) {
         bytes_recvd = recv(t->client_fd, &(t->writeout_buff[writeout_buff_index]), 1, 0);
         if (bytes_recvd == -1) {
             perror("recv");
             syslog(LOG_ERR, "recv");
-            close(t->outfile_fd);
+            close(outfile_fd);
             close(t->client_fd);
             close(t->sock_fd);
             free(t->writeout_buff);
@@ -129,19 +118,19 @@ void* ReceiveAndSendPackets(void* thread_data) {
             if (pthread_mutex_lock(t->mutex) != 0) {
                 perror("pthread_mutex_lock");
                 syslog(LOG_ERR, "pthread_mutex_lock");
-                close(t->outfile_fd);
+                close(outfile_fd);
                 close(t->client_fd);
                 close(t->sock_fd);
                 free(t->writeout_buff);
                 free(t->readout_buff);
                 exit(EXIT_FAILURE);
             }
-            bytes_written_to_file = write(t->outfile_fd, &(t->writeout_buff[0]), writeout_buff_index + 1);
+            bytes_written_to_file = write(outfile_fd, &(t->writeout_buff[0]), writeout_buff_index + 1);
 
             if (pthread_mutex_unlock(t->mutex) != 0) {
                 perror("pthread_mutex_lock");
                 syslog(LOG_ERR, "pthread_mutex_lock");
-                close(t->outfile_fd);
+                close(outfile_fd);
                 close(t->client_fd);
                 close(t->sock_fd);
                 free(t->writeout_buff);
@@ -151,7 +140,7 @@ void* ReceiveAndSendPackets(void* thread_data) {
 
             if (bytes_written_to_file == -1) {
                 syslog(LOG_ERR, "sigprocmask");
-                close(t->outfile_fd);
+                close(outfile_fd);
                 close(t->client_fd);
                 close(t->sock_fd);
                 free(t->writeout_buff);
@@ -172,7 +161,7 @@ void* ReceiveAndSendPackets(void* thread_data) {
             if (t->writeout_buff == NULL) {
                 perror("realloc");
                 syslog(LOG_ERR, "realloc");
-                close(t->outfile_fd);
+                close(outfile_fd);
                 close(t->client_fd);
                 close(t->sock_fd);
                 free(t->writeout_buff);
@@ -183,7 +172,7 @@ void* ReceiveAndSendPackets(void* thread_data) {
 
         if (sigprocmask(SIG_BLOCK, &sig_mask, NULL)) {
             syslog(LOG_ERR, "sigprocmask");
-            close(t->outfile_fd);
+            close(outfile_fd);
             close(t->client_fd);
             close(t->sock_fd);
             free(t->writeout_buff);
@@ -197,21 +186,21 @@ void* ReceiveAndSendPackets(void* thread_data) {
             if (pthread_mutex_lock(t->mutex) != 0) {
                 perror("pthread_mutex_lock");
                 syslog(LOG_ERR, "pthread_mutex_lock");
-                close(t->outfile_fd);
+                close(outfile_fd);
                 close(t->client_fd);
                 close(t->sock_fd);
                 free(t->writeout_buff);
                 free(t->readout_buff);
                 exit(EXIT_FAILURE);
             }
-
-            lseek(t->outfile_fd, 0, SEEK_SET);
-            
-            read_status = read(t->outfile_fd, &(t->readout_buff[readout_buff_index]), 1);
+#ifndef USE_AESD_CHAR_DEVICE
+            lseek(outfile_fd, 0, SEEK_SET);
+#endif
+            read_status = read(outfile_fd, &(t->readout_buff[readout_buff_index]), 1);
             if (read_status == -1) {
                 perror("read");
                 syslog(LOG_ERR, "read");
-                close(t->outfile_fd);
+                close(outfile_fd);
                 close(t->client_fd);
                 close(t->sock_fd);
                 free(t->writeout_buff);
@@ -226,7 +215,7 @@ void* ReceiveAndSendPackets(void* thread_data) {
                     if (send_status == -1) {
                         perror("send");
                         syslog(LOG_ERR, "send");
-                        close(t->outfile_fd);
+                        close(outfile_fd);
                         close(t->client_fd);
                         close(t->sock_fd);
                         free(t->writeout_buff);
@@ -246,7 +235,7 @@ void* ReceiveAndSendPackets(void* thread_data) {
                     if (t->readout_buff == NULL) {
                         perror("realloc");
                         syslog(LOG_ERR, "realloc");
-                        close(t->outfile_fd);
+                        close(outfile_fd);
                         close(t->client_fd);
                         close(t->sock_fd);
                         free(t->writeout_buff);
@@ -255,11 +244,11 @@ void* ReceiveAndSendPackets(void* thread_data) {
                     }
                 }
 
-                read_status = read(t->outfile_fd, &(t->readout_buff[readout_buff_index]), 1);
+                read_status = read(outfile_fd, &(t->readout_buff[readout_buff_index]), 1);
                 if (read_status == -1) {
                     perror("read");
                     syslog(LOG_ERR, "read");
-                    close(t->outfile_fd);
+                    close(outfile_fd);
                     close(t->client_fd);
                     close(t->sock_fd);
                     free(t->writeout_buff);
@@ -268,13 +257,13 @@ void* ReceiveAndSendPackets(void* thread_data) {
                 }
 
             }
-
-            lseek(t->outfile_fd, 0, SEEK_END);
-
+#ifndef USE_AESD_CHAR_DEVICE
+            lseek(outfile_fd, 0, SEEK_END);
+#endif
             if (pthread_mutex_unlock(t->mutex) != 0) {
                 perror("pthread_mutex_lock");
                 syslog(LOG_ERR, "pthread_mutex_lock");
-                close(t->outfile_fd);
+                close(outfile_fd);
                 close(t->client_fd);
                 close(t->sock_fd);
                 free(t->writeout_buff);
@@ -285,7 +274,7 @@ void* ReceiveAndSendPackets(void* thread_data) {
         
         if (sigprocmask(SIG_UNBLOCK, &sig_mask, NULL)) {
             syslog(LOG_ERR, "sigprocmask");
-            close(t->outfile_fd);
+            close(outfile_fd);
             close(t->client_fd);
             close(t->sock_fd);
             free(t->writeout_buff);
@@ -294,6 +283,14 @@ void* ReceiveAndSendPackets(void* thread_data) {
         }
         
     }
+
+    if (close(outfile_fd) == -1) {
+        perror("close");
+        syslog(LOG_ERR, "close");
+        exit(EXIT_FAILURE); 
+
+    }
+
     t->success = 1;
     return thread_data;
 }
@@ -301,7 +298,6 @@ void* ReceiveAndSendPackets(void* thread_data) {
 
 int main(int argc, char** argv) {
     int client_fd;
-    int outfile_fd;
     struct addrinfo hints;
     struct addrinfo* servinfo;
     struct sockaddr peer_addr;
@@ -315,11 +311,6 @@ int main(int argc, char** argv) {
 
     snode_t* node = NULL;
 
-    struct sigevent sev;
-    time_struct_t td;
-    timer_t timer_id;
-    struct itimerspec timer_specs;
-    int clock_id = CLOCK_MONOTONIC;
 
     openlog(NULL, 0, LOG_USER);
 
@@ -436,14 +427,6 @@ int main(int argc, char** argv) {
         return -1;
     }
 
-    outfile_fd = open(OUTPUT_FILE, O_RDWR | O_CREAT | O_TRUNC, 0666);
-    if (outfile_fd == -1) {
-        perror("open");
-        syslog(LOG_ERR, "open");
-        close(sock_fd);
-        exit(EXIT_FAILURE);
-    }
-
     LIST_HEAD(slisthead, snode_s) head;
     LIST_INIT(&head);
 
@@ -451,38 +434,6 @@ int main(int argc, char** argv) {
         perror("pthread_mutex_init");
         syslog(LOG_ERR, "pthread_mutex_init");
         close(sock_fd);
-        close(outfile_fd);
-        exit(EXIT_FAILURE);
-    }
-
-
-    td.outfile_fd = outfile_fd;
-    td.mutex = &mutex;
-
-    memset(&sev, 0, sizeof(struct sigevent));
-
-    sev.sigev_notify = SIGEV_THREAD;
-    sev.sigev_value.sival_ptr = &td;
-    sev.sigev_notify_function = timer_thread;
-
-    if (timer_create(clock_id, &sev, &timer_id) != 0) {
-        perror("timer_create");
-        syslog(LOG_ERR, "timer_create");
-        close(sock_fd);
-        close(outfile_fd);
-        exit(EXIT_FAILURE);
-    }
-
-    timer_specs.it_value.tv_sec = 10;
-    timer_specs.it_value.tv_nsec = 0;
-    timer_specs.it_interval.tv_sec = timer_specs.it_value.tv_sec;
-    timer_specs.it_interval.tv_nsec = timer_specs.it_value.tv_nsec;
-
-    if (timer_settime(timer_id, 0, &timer_specs, NULL) == -1) {
-        perror("set_time");
-        syslog(LOG_ERR, "set_time");
-        close(sock_fd);
-        close(outfile_fd);
         exit(EXIT_FAILURE);
     }
 
@@ -495,7 +446,6 @@ int main(int argc, char** argv) {
             perror("accept");
             syslog(LOG_ERR, "accept");
             close(sock_fd);
-            close(outfile_fd);
             return -1;
         }
         
@@ -508,13 +458,11 @@ int main(int argc, char** argv) {
             syslog(LOG_ERR, "malloc");
             close(client_fd);
             close(sock_fd);
-            close(outfile_fd);
             exit(EXIT_FAILURE);
         }
 
         node->t_data.client_fd = client_fd;
         node->t_data.sock_fd = sock_fd;
-        node->t_data.outfile_fd = outfile_fd;
         node->t_data.mutex = &mutex;
         node->t_data.success = 0;
         node->t_data.writeout_buff_size = BASE_BUFFER_SIZE;
@@ -524,7 +472,6 @@ int main(int argc, char** argv) {
             syslog(LOG_ERR, "malloc");
             close(client_fd);
             close(sock_fd);
-            close(outfile_fd);
             exit(EXIT_FAILURE);
         }
         node->t_data.readout_buff_size = BASE_BUFFER_SIZE;
@@ -534,7 +481,6 @@ int main(int argc, char** argv) {
             syslog(LOG_ERR, "malloc");
             close(client_fd);
             close(sock_fd);
-            close(outfile_fd);
             exit(EXIT_FAILURE);
         }
 
@@ -545,7 +491,6 @@ int main(int argc, char** argv) {
             syslog(LOG_ERR, "pthread_create");
             close(client_fd);
             close(sock_fd);
-            close(outfile_fd);
             exit(EXIT_FAILURE);
         }
 
@@ -555,7 +500,6 @@ int main(int argc, char** argv) {
                 if (close(node->t_data.client_fd) == -1) {
                     perror("close");
                     syslog(LOG_ERR, "close");
-                    close(outfile_fd);
                     close(sock_fd);
                     exit(EXIT_FAILURE);
                 }
@@ -565,7 +509,6 @@ int main(int argc, char** argv) {
                 if (pthread_join(node->t_data.tid, NULL) != 0) {
                     perror("pthread_join");
                     syslog(LOG_ERR, "pthread_join");
-                    close(outfile_fd);
                     close(sock_fd);
                     exit(EXIT_FAILURE);
                 }
@@ -586,7 +529,6 @@ int main(int argc, char** argv) {
             if (pthread_cancel(node->t_data.tid) != 0) {
                 perror("pthread_cancel");
                 syslog(LOG_ERR, "pthread_cancel");
-                close(outfile_fd);
                 close(sock_fd);
                 exit(EXIT_FAILURE);
             }
@@ -599,7 +541,6 @@ int main(int argc, char** argv) {
         if (pthread_join(node->t_data.tid, NULL) != 0) {
             perror("pthread_join");
             syslog(LOG_ERR, "pthread_join");
-            close(outfile_fd);
             close(sock_fd);
             exit(EXIT_FAILURE);
         }
@@ -611,7 +552,6 @@ int main(int argc, char** argv) {
         perror("pthread_mutex_destroy");
         syslog(LOG_ERR, "pthread_mutex_destroy");
         close(sock_fd);
-        close(outfile_fd);
         exit(EXIT_FAILURE);
     }
     
@@ -622,18 +562,10 @@ int main(int argc, char** argv) {
         exit(EXIT_FAILURE);
     }
 
-    if (close(outfile_fd) == -1) {
-        perror("close");
-        syslog(LOG_ERR, "close");
-        exit(EXIT_FAILURE); 
 
-    }
-
-    if (remove(OUTPUT_FILE) == -1) {
-        perror("remove");
-        syslog(LOG_ERR, "remove");
-        exit(EXIT_FAILURE);
-    }
+#ifndef USE_AESD_CHAR_DEVICE
+    remove(OUTPUT_FILE);
+#endif
     closelog();
 
     return 0;
